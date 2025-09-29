@@ -1,0 +1,28 @@
+# Node.js modules
+node_modules/
+.env
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.log
+
+# Build artifacts
+dist/
+build/
+coverage/
+
+# Editor/IDE specific files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Other common files to ignore
+*.bak
+*.swp
