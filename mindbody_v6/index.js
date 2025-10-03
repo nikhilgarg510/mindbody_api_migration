@@ -44,6 +44,7 @@ const mindbodyService = function ({
 
   service.GetClients = async (params) => {
     try {
+
       const result = await v6Service.GetClients(params)
       _logV6({ action: 'GetClients', params, result })
       return result

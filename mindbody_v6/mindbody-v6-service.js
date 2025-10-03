@@ -9,13 +9,16 @@ const BASE_URL = 'https://api.mindbodyonline.com/public/v6'
 
 class MindBodyV6Service {
     constructor({ site_id, username, password, api_key }) {
-        //this.site_id = site_id
-        this.site_id = process.env.MINDBODY_TEST_SITE_ID || -99
+        // Primary site_id for authentication - use from env or provided value
+        this.site_id = site_id || process.env.MINDBODY_SITE_ID || process.env.MINDBODY_TEST_SITE_ID || -99
         this.username = username
         this.password = password
         this.api_key = api_key || process.env.MINDBODY_API_KEY
         this.access_token = null
         this.token_expires_at = null
+
+        // Default siteId from environment variable (fallback to primary site_id)
+        this.default_site_id = this._parseDefaultSiteId()
 
         // Token file path for persistent storage
         this.tokenFilePath = path.join(__dirname, 'mindbody_v6_token.json')
@@ -32,64 +35,46 @@ class MindBodyV6Service {
         })
     }
 
-    // v6 MIGRATION: Token file management methods
-    async loadTokenFromFile() {
-        try {
-            const tokenData = await fs.readFile(this.tokenFilePath, 'utf8')
-            const parsedData = JSON.parse(tokenData)
-
-            console.log('📁 Token loaded from file:', {
-                hasToken: !!parsedData.access_token,
-                expiresAt: parsedData.token_expires_at,
-                isExpired: moment().isAfter(moment(parsedData.token_expires_at))
-            })
-
-            return parsedData
-        } catch (error) {
-            // File doesn't exist or is corrupted
-            console.log('📁 No valid token file found, will generate new token')
-            return null
-        }
-    }
-
-    async saveTokenToFile(tokenData) {
-        try {
-            const dataToSave = {
-                access_token: tokenData.access_token,
-                token_expires_at: tokenData.token_expires_at.toISOString(),
-                site_id: this.site_id,
-                generated_at: moment().toISOString()
-            }
-
-            await fs.writeFile(this.tokenFilePath, JSON.stringify(dataToSave, null, 2))
-            console.log('💾 Token saved to file successfully')
-        } catch (error) {
-            console.error('❌ Failed to save token to file:', error.message)
-            // Don't throw error - continue with in-memory token
-        }
-    }
-
-    async getValidToken() {
-        // First, try to load token from file
-        if (!this.access_token || !this.token_expires_at) {
-            const storedToken = await this.loadTokenFromFile()
-            if (storedToken) {
-                this.access_token = storedToken.access_token
-                this.token_expires_at = moment(storedToken.token_expires_at)
+    // Parse default site ID from environment variable
+    _parseDefaultSiteId() {
+        const envSiteId = process.env.MINDBODY_DEFAULT_SITE_ID || process.env.MINDBODY_SITE_ID;
+        if (envSiteId) {
+            const parsed = parseInt(envSiteId.trim(), 10);
+            if (!isNaN(parsed)) {
+                return parsed;
             }
         }
+        return this.site_id;
+    }
 
-        // Check if current token is valid
-        if (this.access_token && this.token_expires_at && moment().isBefore(this.token_expires_at)) {
-            console.log('✅ Using existing valid token')
-            this.client.defaults.headers.Authorization = `Bearer ${this.access_token}`
-            return this.access_token
+    // Get site ID to use for requests - prioritize provided siteId, fallback to default
+    _getSiteId(providedSiteId = null) {
+        if (providedSiteId !== null && providedSiteId !== undefined) {
+            if (typeof providedSiteId === 'string') {
+                const parsed = parseInt(providedSiteId.trim(), 10);
+                return !isNaN(parsed) ? parsed : this.default_site_id;
+            } else if (typeof providedSiteId === 'number') {
+                return providedSiteId;
+            }
         }
+        return this.default_site_id;
+    }
 
-        // Token is expired or doesn't exist, generate new one
-        console.log('🔄 Token expired or not found, generating new token...')
-        await this.generateAndStoreToken()
-        return this.access_token
+    // Get site IDs array for GetSites method specifically - handles siteIds as array
+    _getSiteIds(providedSiteIds = null) {
+        if (providedSiteIds !== null && providedSiteIds !== undefined) {
+            // Convert to array if single value provided
+            if (Array.isArray(providedSiteIds)) {
+                return providedSiteIds.map(id => parseInt(id, 10)).filter(id => !isNaN(id));
+            } else if (typeof providedSiteIds === 'string') {
+                // Handle comma-separated string
+                return providedSiteIds.split(',').map(id => parseInt(id.trim(), 10)).filter(id => !isNaN(id));
+            } else if (typeof providedSiteIds === 'number') {
+                return [providedSiteIds];
+            }
+        }
+        // Default to array with default site ID
+        return [this.default_site_id];
     }
 
     async generateAndStoreToken(retryCount = 0) {
@@ -106,18 +91,6 @@ class MindBodyV6Service {
 
             if (response.data && response.data.AccessToken) {
                 this.access_token = response.data.AccessToken
-                // Tokens typically expire in 24 hours, set expiry to 23 hours for safety
-                this.token_expires_at = moment().add(23, 'hours')
-
-                // Update default authorization header
-                this.client.defaults.headers.Authorization = `Bearer ${this.access_token}`
-
-                // Save token to file for future use
-                await this.saveTokenToFile({
-                    access_token: this.access_token,
-                    token_expires_at: this.token_expires_at
-                })
-
                 console.log('✅ New MindBody API v6 token generated and saved')
                 return true
             } else {
@@ -125,9 +98,9 @@ class MindBodyV6Service {
             }
         } catch (error) {
             // Enhanced error handling with retry logic for network errors
-            const isNetworkError = error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT';
+            //const isNetworkError = error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT';
 
-            if (isNetworkError && retryCount < MAX_RETRIES) {
+            if (retryCount < MAX_RETRIES && error.response.status != 403) {
                 console.warn(`⚠️ Network error occurred (${error.code}), retrying in ${RETRY_DELAY / 1000} seconds... (${retryCount + 1}/${MAX_RETRIES})`);
 
                 // Wait for 3 seconds before retry
@@ -183,68 +156,41 @@ class MindBodyV6Service {
         }
     }
 
-    // v6 MIGRATION: New token-based authentication system (DEPRECATED - use getValidToken instead)
-    /*async authenticate() {
-        try {
-            console.log('🔐 Authenticating with MindBody API v6...')
-
-            const response = await this.client.post('/usertoken/issue', {
-                Username: this.username,
-                Password: this.password
-            })
-
-            if (response.data && response.data.AccessToken) {
-                this.access_token = response.data.AccessToken
-                // Tokens typically expire in 24 hours, set expiry to 23 hours for safety
-                this.token_expires_at = moment().add(23, 'hours')
-
-                // Update default authorization header
-                this.client.defaults.headers.Authorization = `Bearer ${this.access_token}`
-
-                console.log('✅ MindBody API v6 authentication successful')
-                return true
-            } else {
-                throw new Error('No access token in response')
-            }
-        } catch (error) {
-            // Enhanced error handling to prevent server crashes
-            if (error.code === 'ENOTFOUND') {
-                const networkError = new Error('Network error: Cannot reach MindBody API servers. Check your internet connection and firewall settings.')
-                networkError.code = 'NETWORK_ERROR'
-                networkError.originalError = error
-                console.error('❌', networkError.message)
-                throw networkError
-            } else if (error.code === 'ECONNREFUSED') {
-                const connectionError = new Error('Connection refused: MindBody API servers are not responding.')
-                connectionError.code = 'CONNECTION_REFUSED'
-                connectionError.originalError = error
-                console.error('❌', connectionError.message)
-                throw connectionError
-            } else if (error.code === 'ETIMEDOUT') {
-                const timeoutError = new Error('Request timeout: MindBody API servers took too long to respond.')
-                timeoutError.code = 'TIMEOUT_ERROR'
-                timeoutError.originalError = error
-                console.error('❌', timeoutError.message)
-                throw timeoutError
-            } else {
-                console.error('❌ MindBody API v6 authentication failed:', error.message)
-                throw error
-            }
-        }
-    }*/
-
     // v6 MIGRATION: Automatic token refresh before requests (Updated to use file-based token management)
     async ensureAuthenticated() {
         try {
-            await this.getValidToken()
+            await this.generateAndStoreToken()
         } catch (error) {
             // Re-throw with proper error context to prevent unhandled rejections
             throw error
         }
     }
 
+    // Add siteId parameter to request params
+    _addSiteIdToParams(params, providedSiteId = null) {
+        const siteId = this._getSiteId(providedSiteId);
+        const requestParams = params || {};
+
+        // Always include siteId parameter as required by v6 API
+        requestParams.siteId = siteId;
+
+        return requestParams;
+    }
+
+    // Add siteIds array parameter to request params (specifically for GetSites)
+    _addSiteIdsToParams(params, providedSiteIds = null) {
+        const siteIds = this._getSiteIds(providedSiteIds);
+        const requestParams = params || {};
+
+        // Always include siteIds parameter as array for GetSites API
+        requestParams.siteIds = siteIds.join(',');
+
+        return requestParams;
+    }
+
     // v6 MIGRATION: Generic request wrapper with error handling
-    async makeRequest(method, endpoint, data = null, params = null) {
+    async makeRequest(method, endpoint, data = null, params = null, providedSiteId = null) {
+
         try {
             await this.ensureAuthenticated()
         } catch (authError) {
@@ -256,11 +202,17 @@ class MindBodyV6Service {
         }
 
         try {
+            // Always add siteId parameter to requests
+            const requestParams = this._addSiteIdToParams(params, providedSiteId);
+
             const config = {
                 method,
                 url: endpoint,
                 ...(data && { data }),
-                ...(params && { params })
+                params: requestParams,
+                headers: {
+                    'Authorization': `Bearer ${this.access_token}`
+                }
             }
 
             const response = await this.client.request(config)
@@ -343,21 +295,23 @@ class MindBodyV6Service {
     }
 
     // v6 MIGRATION: GetClients endpoint - changed from SOAP to REST
-    async GetClients({ email, client_ids = null, search_text = null } = {}) {
+    async GetClients({ email, siteId = null } = {}) {
         const params = {}
 
-        if (email) params.searchText = email
-        if (search_text) params.searchText = search_text
-        if (client_ids) params.clientIds = Array.isArray(client_ids) ? client_ids.join(',') : client_ids
+        // Use email as searchText parameter for v6 API
+        if (email) params['request.searchText'] = email
+
         try {
-            const response = await this.makeRequest('GET', '/client/clients', null, params)
+            const response = await this.makeRequest('GET', '/client/clients', null, params, siteId)
+
+            console.log('GetClients response:', response)
 
             // v6 MIGRATION: Transform response to match v5 format for backward compatibility
             return response.Clients ? response.Clients.map(client => ({
                 id: client.Id.toString()
             })) : []
         } catch (error) {
-            console.error('Error fetching services:', error)
+            console.error('Error fetching clients:', error)
             throw error
         }
     }
@@ -381,7 +335,8 @@ class MindBodyV6Service {
             emergency_contact_name,
             emergency_contact_phone,
             emergency_contact_relationship,
-            referred_by
+            referred_by,
+            siteId
         } = params
 
         const clientData = {
@@ -410,12 +365,12 @@ class MindBodyV6Service {
                 // Update existing client
                 response = await this.makeRequest('PUT', '/client/updateclient', {
                     Client: { ...clientData, Id: id }
-                })
+                }, null, siteId)
             } else {
                 // Add new client  
                 response = await this.makeRequest('POST', '/client/addclient', {
                     Client: clientData
-                })
+                }, null, siteId)
             }
 
             // v6 MIGRATION: Transform response to match v5 format
@@ -454,12 +409,12 @@ class MindBodyV6Service {
     }
 
     // v6 MIGRATION: GetServices endpoint - REST format
-    async GetServices({ class_id = null } = {}) {
+    async GetServices({ class_id = null, siteId = null } = {}) {
         const params = {}
         if (class_id) params.classId = class_id
 
         try {
-            const response = await this.makeRequest('GET', '/sale/services', null, params)
+            const response = await this.makeRequest('GET', '/sale/services', null, params, siteId)
 
             // v6 MIGRATION: Transform response to match v5 format
             return response.Services ? response.Services.map(service => ({
@@ -476,14 +431,14 @@ class MindBodyV6Service {
     }
 
     // v6 MIGRATION: GetClientServices endpoint - REST format  
-    async GetClientServices({ client_id, class_id } = {}) {
+    async GetClientServices({ client_id, class_id, siteId = null } = {}) {
         const params = {
             clientId: client_id
         }
         if (class_id) params.classId = class_id
 
         try {
-            const response = await this.makeRequest('GET', '/client/clientservices', null, params)
+            const response = await this.makeRequest('GET', '/client/clientservices', null, params, siteId)
 
             // v6 MIGRATION: Transform response to match v5 format
             return response.ClientServices ? response.ClientServices.map(service => ({
@@ -497,7 +452,7 @@ class MindBodyV6Service {
     }
 
     // v6 MIGRATION: UpdateClientServices endpoint - REST format
-    async UpdateClientServices({ client_service_id, active_date, expiration_date } = {}) {
+    async UpdateClientServices({ client_service_id, active_date, expiration_date, siteId = null } = {}) {
         try {
             const response = await this.makeRequest('PUT', '/client/clientservices', {
                 ClientService: {
@@ -505,7 +460,7 @@ class MindBodyV6Service {
                     ActiveDate: moment(active_date).format('YYYY-MM-DD'),
                     ExpirationDate: moment(expiration_date).format('YYYY-MM-DD')
                 }
-            })
+            }, null, siteId)
 
             return response.Success || false
         } catch (error) {
@@ -515,7 +470,7 @@ class MindBodyV6Service {
     }
 
     // v6 MIGRATION: CheckoutShoppingCart endpoint - REST format
-    async CheckoutShoppingCart({ client_id, service_id, amount } = {}) {
+    async CheckoutShoppingCart({ client_id, service_id, amount, siteId = null } = {}) {
         try {
             const response = await this.makeRequest('POST', '/sale/checkoutshoppingcart', {
                 ClientId: client_id,
@@ -533,7 +488,7 @@ class MindBodyV6Service {
                 InStore: false,
                 SendEmail: false,
                 Test: false
-            })
+            }, null, siteId)
 
             return response.Success || false
         } catch (error) {
@@ -543,7 +498,7 @@ class MindBodyV6Service {
     }
 
     // v6 MIGRATION: GetClasses endpoint - REST format
-    async GetClasses({ location_id, class_id, start_date, end_date } = {}) {
+    async GetClasses({ location_id, class_id, start_date, end_date, siteId = null } = {}) {
         const params = {}
 
         if (location_id) {
@@ -560,8 +515,7 @@ class MindBodyV6Service {
         }
 
         try {
-
-            const response = await this.makeRequest('GET', '/class/classes', null, params)
+            const response = await this.makeRequest('GET', '/class/classes', null, params, siteId)
 
             // v6 MIGRATION: Transform response to match v5 format
             return response.Classes ? response.Classes.map(cls => ({
@@ -591,11 +545,11 @@ class MindBodyV6Service {
     }
 
     // v6 MIGRATION: GetClassVisits endpoint - REST format
-    async GetClassVisits({ class_id } = {}) {
+    async GetClassVisits({ class_id, siteId = null } = {}) {
         try {
             const response = await this.makeRequest('GET', '/class/classvisits', null, {
                 classId: class_id
-            })
+            }, siteId)
 
             // v6 MIGRATION: Transform response to match v5 format
             if (response.Class && response.Class.Visits) {
@@ -616,15 +570,15 @@ class MindBodyV6Service {
     }
 
     // v6 MIGRATION: GetClassSchedules endpoint - REST format
-    async GetClassSchedules({ location_id, start_date, end_date } = {}) {
+    async GetClassSchedules({ location_id, start_date, end_date, siteId = null } = {}) {
         const params = {}
 
         if (location_id) params.locationIds = location_id
         if (start_date) params.startDateTime = moment(start_date).format('YYYY-MM-DDTHH:mm:ss')
         if (end_date) params.endDateTime = moment(end_date).format('YYYY-MM-DDTHH:mm:ss')
-        try {
 
-            const response = await this.makeRequest('GET', '/class/classschedules', null, params)
+        try {
+            const response = await this.makeRequest('GET', '/class/classschedules', null, params, siteId)
 
             // v6 MIGRATION: Transform response to match v5 format
             return response.ClassSchedules ? response.ClassSchedules.map(schedule => ({
@@ -647,9 +601,11 @@ class MindBodyV6Service {
     }
 
     // v6 MIGRATION: GetSites endpoint - REST format
-    async GetSites() {
+    async GetSites({ siteIds = null } = {}) {
         try {
-            const response = await this.makeRequest('GET', '/site/sites')
+            // Special handling for GetSites - uses siteIds array parameter
+            const requestParams = this._addSiteIdsToParams(null, siteIds);
+            const response = await this.makeRequest('GET', '/site/sites', null, requestParams)
 
             // v6 MIGRATION: Transform response to match v5 format
             return response.Sites ? response.Sites.map(site => ({
@@ -657,17 +613,18 @@ class MindBodyV6Service {
                 name: site.Name
             })) : []
         } catch (error) {
-            console.error('Error fetching services:', error)
+            console.error('Error fetching sites:', error)
             throw error
         }
     }
 
     // v6 MIGRATION: GetLocations endpoint - REST format
-    async GetLocations() {
+    async GetLocations({ siteId = null } = {}) {
         try {
-            const response = await this.makeRequest('GET', '/site/locations')
+            const response = await this.makeRequest('GET', '/site/locations', null, null, siteId)
 
             // v6 MIGRATION: Transform response to match v5 format
+            console.log('📍 Fetched locations:', response.Locations ? response.Locations.length : 0)
             return response.Locations ? response.Locations.map(location => ({
                 id: location.Id.toString(),
                 name: location.Name
@@ -679,7 +636,7 @@ class MindBodyV6Service {
     }
 
     // v6 MIGRATION: AddClientsToClasses endpoint - REST format
-    async AddClientsToClasses({ client_id, class_id, client_service_id = null } = {}) {
+    async AddClientsToClasses({ client_id, class_id, client_service_id = null, siteId = null } = {}) {
         try {
             const response = await this.makeRequest('POST', '/class/addclientstoclass', {
                 ClientIds: Array.isArray(client_id) ? client_id : [client_id],
@@ -687,7 +644,7 @@ class MindBodyV6Service {
                 SendEmail: false,
                 Test: false,
                 ...(client_service_id && { ClientServiceId: client_service_id })
-            })
+            }, null, siteId)
 
             if (response.Success) {
                 return true
@@ -701,7 +658,7 @@ class MindBodyV6Service {
     }
 
     // v6 MIGRATION: RemoveClientsFromClasses endpoint - REST format  
-    async RemoveClientsFromClasses({ client_id, class_id, late_cancel = false } = {}) {
+    async RemoveClientsFromClasses({ client_id, class_id, late_cancel = false, siteId = null } = {}) {
         try {
             const response = await this.makeRequest('POST', '/class/removeclientsfromclass', {
                 ClientIds: Array.isArray(client_id) ? client_id : [client_id],
@@ -709,7 +666,7 @@ class MindBodyV6Service {
                 SendEmail: false,
                 LateCancel: late_cancel,
                 Test: false
-            })
+            }, null, siteId)
 
             return response.Success || false
         } catch (error) {

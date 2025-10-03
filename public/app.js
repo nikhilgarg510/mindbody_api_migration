@@ -3,11 +3,10 @@ class MindBodyAPITester {
     constructor() {
         this.apiEndpoints = {
             'GetClients': {
-                description: 'Retrieve client information by email, ID, or search text',
+                description: 'Retrieve client information by email address',
                 parameters: {
-                    'email': { type: 'email', label: 'Email Address', placeholder: 'client@example.com', required: false },
-                    'client_ids': { type: 'text', label: 'Client IDs (comma-separated)', placeholder: '123,456,789', required: false },
-                    'search_text': { type: 'text', label: 'Search Text', placeholder: 'John Doe', required: false }
+                    'email': { type: 'text', label: 'Email Address', placeholder: 'client@example.com', required: false },
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
                 }
             },
             'AddOrUpdateClients': {
@@ -46,20 +45,23 @@ class MindBodyAPITester {
                     'emergency_contact_name': { type: 'text', label: 'Emergency Contact Name', placeholder: 'Jane Doe', required: true },
                     'emergency_contact_phone': { type: 'tel', label: 'Emergency Contact Phone', placeholder: '+1234567890', required: true },
                     'emergency_contact_relationship': { type: 'text', label: 'Emergency Contact Relationship', placeholder: 'Spouse', required: true },
-                    'referred_by': { type: 'text', label: 'Referred By', placeholder: 'John Smith', required: false }
+                    'referred_by': { type: 'text', label: 'Referred By', placeholder: 'John Smith', required: false },
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
                 }
             },
             'GetServices': {
                 description: 'Retrieve available services, optionally filtered by class',
                 parameters: {
-                    'class_id': { type: 'number', label: 'Class ID (optional)', placeholder: '123', required: false }
+                    'class_id': { type: 'number', label: 'Class ID (optional)', placeholder: '123', required: false },
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
                 }
             },
             'GetClientServices': {
                 description: 'Get services associated with a specific client',
                 parameters: {
                     'client_id': { type: 'text', label: 'Client ID', placeholder: 'ABC123-XYZ', required: true },
-                    'class_id': { type: 'number', label: 'Class ID', placeholder: '456', required: true }
+                    'class_id': { type: 'number', label: 'Class ID', placeholder: '456', required: true },
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
                 }
             },
             'UpdateClientServices': {
@@ -67,7 +69,8 @@ class MindBodyAPITester {
                 parameters: {
                     'client_service_id': { type: 'text', label: 'Client Service ID', placeholder: 'CS789-ABC', required: true },
                     'active_date': { type: 'datetime-local', label: 'Active Date', required: false },
-                    'expiration_date': { type: 'datetime-local', label: 'Expiration Date', required: false }
+                    'expiration_date': { type: 'datetime-local', label: 'Expiration Date', required: false },
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
                 }
             },
             'CheckoutShoppingCart': {
@@ -75,7 +78,8 @@ class MindBodyAPITester {
                 parameters: {
                     'client_id': { type: 'text', label: 'Client ID', placeholder: 'ABC123-XYZ', required: true },
                     'service_id': { type: 'number', label: 'Service ID', placeholder: '456', required: true },
-                    'amount': { type: 'number', label: 'Amount', placeholder: '99.99', step: '0.01', required: true }
+                    'amount': { type: 'number', label: 'Amount', placeholder: '99.99', step: '0.01', required: true },
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
                 }
             },
             'GetClasses': {
@@ -84,37 +88,45 @@ class MindBodyAPITester {
                     'location_id': { type: 'number', label: 'Location ID', placeholder: '1', required: false },
                     'class_id': { type: 'number', label: 'Class ID', placeholder: '123', required: false },
                     'start_date': { type: 'datetime-local', label: 'Start Date', required: false },
-                    'end_date': { type: 'datetime-local', label: 'End Date', required: false }
+                    'end_date': { type: 'datetime-local', label: 'End Date', required: false },
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
                 }
             },
             'GetClassSchedules': {
                 description: 'Get class schedules for a location and date range',
                 parameters: {
-                    'location_id': { type: 'number', label: 'Location ID', placeholder: '1', required: false },
-                    'start_date': { type: 'datetime-local', label: 'Start Date', required: false },
-                    'end_date': { type: 'datetime-local', label: 'End Date', required: false }
+                    'location_id': { type: 'number', label: 'Location ID', placeholder: '1', required: true },
+                    'start_date': { type: 'datetime-local', label: 'Start Date', required: true },
+                    'end_date': { type: 'datetime-local', label: 'End Date', required: true },
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
                 }
             },
             'GetClassVisits': {
                 description: 'Get visit information for a specific class',
                 parameters: {
-                    'class_id': { type: 'number', label: 'Class ID', placeholder: '123', required: true }
+                    'class_id': { type: 'number', label: 'Class ID', placeholder: '123', required: true },
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
                 }
             },
             'GetSites': {
-                description: 'Retrieve all available sites',
-                parameters: {}
+                description: 'Retrieve all available sites, optionally filtered by site IDs',
+                parameters: {
+                    'siteIds': { type: 'text', label: 'Site IDs (comma-separated)', placeholder: '1,2,3', required: false }
+                }
             },
             'GetLocations': {
                 description: 'Retrieve all available locations',
-                parameters: {}
+                parameters: {
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
+                }
             },
             'AddClientsToClasses': {
                 description: 'Add clients to specific classes',
                 parameters: {
                     'client_id': { type: 'text', label: 'Client ID', placeholder: 'ABC123-XYZ', required: true },
                     'class_id': { type: 'number', label: 'Class ID', placeholder: '456', required: true },
-                    'client_service_id': { type: 'text', label: 'Client Service ID (optional)', placeholder: 'CS789-ABC', required: false }
+                    'client_service_id': { type: 'text', label: 'Client Service ID (optional)', placeholder: 'CS789-ABC', required: false },
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
                 }
             },
             'RemoveClientsFromClasses': {
@@ -122,7 +134,8 @@ class MindBodyAPITester {
                 parameters: {
                     'client_id': { type: 'text', label: 'Client ID', placeholder: 'ABC123-XYZ', required: true },
                     'class_id': { type: 'number', label: 'Class ID', placeholder: '456', required: true },
-                    'late_cancel': { type: 'checkbox', label: 'Late Cancel', required: false }
+                    'late_cancel': { type: 'checkbox', label: 'Late Cancel', required: false },
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
                 }
             }
         };

@@ -84,14 +84,21 @@ app.post('/api/compare', async (req, res) => {
         console.log(`🔍 API Comparison Request: ${apiEndpoint}`, params)
         const startTime = Date.now()
 
+        // Extract site_id from params for dynamic service creation
+        const site_id = params?.site_id || params?.siteId || params?.siteIds;
+        // Create dynamic service instances based on site_id parameter
+        const dynamicServices = createDynamicServices(site_id);
+
+        console.log(`📋 Using site_id: ${site_id || 'default'} for comparison`);
+
         // Race against timeout to ensure we always respond
         const result = await Promise.race([
             // Main comparison logic
             (async () => {
-                // Call both APIs in parallel with individual timeouts
+                // Call both APIs in parallel with individual timeouts using dynamic services
                 const [v5Result, v6Result] = await Promise.allSettled([
-                    callMindbodyAPI(mindbodyV5, apiEndpoint, params),
-                    callMindbodyAPI(mindbodyV6, apiEndpoint, params)
+                    callMindbodyAPI(dynamicServices.v5, apiEndpoint, params),
+                    callMindbodyAPI(dynamicServices.v6, apiEndpoint, params)
                 ])
 
                 return { v5Result, v6Result }
@@ -157,6 +164,32 @@ async function callMindbodyAPI(service, endpoint, params) {
         throw new Error(`API endpoint '${endpoint}' not found`)
     }
     return await service[endpoint](params)
+}
+
+// Helper function to create dynamic service instances based on site_id
+function createDynamicServices(site_id = null) {
+    const effectiveSiteId = site_id || requiredEnvVars.MINDBODY_SITE_ID;
+
+    try {
+        const dynamicV5 = MindBodyV5Service({
+            site_id: effectiveSiteId,
+            username: requiredEnvVars.MINDBODY_USERNAME,
+            password: requiredEnvVars.MINDBODY_PASSWORD,
+        });
+
+        const dynamicV6 = MindBodyV6Service({
+            site_id: effectiveSiteId,
+            username: requiredEnvVars.MINDBODY_USERNAME,
+            password: requiredEnvVars.MINDBODY_PASSWORD,
+            api_key: requiredEnvVars.MINDBODY_API_KEY,
+        });
+
+        return { v5: dynamicV5, v6: dynamicV6 };
+    } catch (error) {
+        console.error('❌ Failed to create dynamic MindBody services:', error.message);
+        // Fallback to default services
+        return { v5: mindbodyV5, v6: mindbodyV6 };
+    }
 }
 
 // Health check endpoint

@@ -49,8 +49,8 @@ router.get('/', (req, res) => {
 // Client endpoints
 router.get('/clients', checkService, async (req, res) => {
     try {
-        const { email, client_ids, search_text } = req.query
-        const result = await mindbodyV6.GetClients({ email, client_ids, search_text })
+        const { email, siteId } = req.query
+        const result = await mindbodyV6.GetClients({ email, siteId })
         res.json({ success: true, data: result })
     } catch (error) {
         res.status(500).json({ error: 'Failed to get clients', message: error.message })
@@ -167,7 +167,8 @@ router.get('/locations', checkService, async (req, res) => {
 
 router.get('/sites', checkService, async (req, res) => {
     try {
-        const result = await mindbodyV6.GetSites()
+        const { siteIds } = req.query
+        const result = await mindbodyV6.GetSites({ siteIds })
         res.json({ success: true, data: result })
     } catch (error) {
         res.status(500).json({ error: 'Failed to get sites', message: error.message })
