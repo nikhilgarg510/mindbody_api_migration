@@ -1,6 +1,11 @@
 const moment = require('moment')
-// MindBody API v6 Service - Pure v6 Implementation
+// MindBody V6 Service - Pure v6 Implementation
+
+
+// MindBody V6 Service - Pure v6 Implementation
 const MindBodyV6Service = require('./mindbody-v6-service')
+
+
 
 const mindbodyService = function ({
   site_id,
@@ -117,6 +122,18 @@ const mindbodyService = function ({
     const result = await v6Service.RemoveClientsFromClasses(params)
     _logV6({ action: 'RemoveClientsFromClasses', params, result })
     return result
+  }
+
+  service.GetClientSchedule = async (params) => {
+
+    try {
+      const result = await v6Service.GetClientSchedule(params)
+      _logV6({ action: 'GetClientSchedule', params, result })
+      return result
+    } catch (error) {
+      _logV6({ action: 'GetClientSchedule', params, error: error.message })
+      throw error
+    }
   }
 
   // Helper methods - Pure v6 implementation

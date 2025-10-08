@@ -22,15 +22,15 @@
         }
 
         .container {
-            max-width: 1400px;
+            max-width: 95vw;
             margin: 0 auto;
-            padding: 20px;
+            padding: 10px;
         }
 
         .header {
             text-align: center;
             color: white;
-            margin-bottom: 30px;
+            margin-bottom: 20px;
         }
 
         .header h1 {
@@ -49,11 +49,14 @@
             border-radius: 15px;
             box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
             overflow: hidden;
-            margin-bottom: 30px;
+            margin-bottom: 10px;
+            min-height: calc(100vh - 120px);
+            display: flex;
+            flex-direction: column;
         }
 
         .form-section {
-            padding: 30px;
+            padding: 20px;
             background: #f8f9fa;
             border-bottom: 1px solid #e9ecef;
         }
@@ -169,7 +172,10 @@
 
         .results-section {
             display: none;
-            padding: 30px;
+            padding: 20px;
+            flex: 1;
+            overflow: visible;
+            min-height: 400px;
         }
 
         .results-header {
@@ -200,13 +206,17 @@
         .comparison-grid {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            gap: 20px;
+            gap: 15px;
+            height: calc(100% - 100px);
         }
 
         .api-result {
             border-radius: 10px;
             overflow: hidden;
             border: 2px solid #e9ecef;
+            display: flex;
+            flex-direction: column;
+            height: 100%;
         }
 
         .api-result.v5 {
@@ -253,25 +263,33 @@
         }
 
         .api-content {
-            padding: 20px;
+            padding: 15px;
             background: #f8f9fa;
-            max-height: 500px;
+            flex: 1;
             overflow-y: auto;
+            overflow-x: hidden;
         }
 
         .json-display {
             background: #2d3748;
             border-radius: 8px;
             overflow: hidden;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
         }
 
         .json-display pre {
             margin: 0;
-            padding: 20px;
+            padding: 15px;
             color: #e2e8f0;
-            font-size: 14px;
+            font-size: 12px;
             line-height: 1.5;
-            overflow-x: auto;
+            overflow: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            flex: 1;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
         }
 
         .error-message {
@@ -290,6 +308,9 @@
         }
 
         @media (max-width: 768px) {
+            .container {
+                padding: 5px;
+            }
 
             .form-row,
             .comparison-grid {
@@ -306,6 +327,23 @@
                 align-items: center;
                 gap: 15px;
             }
+
+            .main-card {
+                height: calc(100vh - 60px);
+            }
+
+            .header {
+                margin-bottom: 10px;
+            }
+
+            .header h1 {
+                font-size: 2rem;
+            }
+
+            .json-display pre {
+                font-size: 11px;
+                padding: 10px;
+            }
         }
 
         .api-description {
@@ -316,14 +354,53 @@
             font-size: 14px;
             color: #1565c0;
         }
+
+        .api-version-selector {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 15px;
+            border: 2px solid #e9ecef;
+        }
+
+        .version-option {
+            margin-bottom: 10px;
+        }
+
+        .version-option:last-child {
+            margin-bottom: 0;
+        }
+
+        .version-option input[type="radio"] {
+            margin-right: 8px;
+            transform: scale(1.2);
+        }
+
+        .version-option label {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-weight: 500;
+            color: #495057;
+            transition: color 0.3s ease;
+        }
+
+        .version-option input[type="radio"]:checked+label {
+            color: #667eea;
+            font-weight: 600;
+        }
+
+        .version-option label:hover {
+            color: #667eea;
+        }
     </style>
 </head>
 
 <body>
     <div class="container">
         <div class="header">
-            <h1><i class="fas fa-exchange-alt"></i> MindBody API Comparison Tool</h1>
-            <p>Compare V5 (SOAP) and V6 (REST) API responses side by side</p>
+            <h1><i class="fas fa-exchange-alt"></i> MindBody API Testing Tool</h1>
+            <p>Test V5 (SOAP), V6 (REST), or compare both API responses side by side</p>
         </div>
 
         <div class="main-card">
@@ -335,6 +412,30 @@
                             <select id="apiSelect" class="form-control">
                                 <option value="">Choose an API to test...</option>
                             </select>
+                        </div>
+
+                        <div class="form-group">
+                            <label><i class="fas fa-cogs"></i> API Version Selection</label>
+                            <div class="api-version-selector">
+                                <div class="version-option">
+                                    <input type="radio" id="versionBoth" name="apiVersion" value="both" checked>
+                                    <label for="versionBoth">
+                                        <i class="fas fa-exchange-alt"></i> Both V5 & V6 (Compare)
+                                    </label>
+                                </div>
+                                <div class="version-option">
+                                    <input type="radio" id="versionV5" name="apiVersion" value="v5">
+                                    <label for="versionV5">
+                                        <i class="fas fa-soap"></i> V5 Only (SOAP)
+                                    </label>
+                                </div>
+                                <div class="version-option">
+                                    <input type="radio" id="versionV6" name="apiVersion" value="v6">
+                                    <label for="versionV6">
+                                        <i class="fas fa-code"></i> V6 Only (REST)
+                                    </label>
+                                </div>
+                            </div>
                         </div>
 
                         <div id="apiDescription" class="api-description" style="display: none;"></div>
@@ -383,7 +484,7 @@
                     <div class="api-result v6">
                         <div class="api-header">
                             <div>
-                                <i class="fas fa-rest"></i> API V6 (REST)
+                                <i class="fas fa-code"></i> API V6 (REST)
                             </div>
                             <div id="v6Status"></div>
                         </div>

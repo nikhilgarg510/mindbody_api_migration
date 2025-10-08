@@ -64,14 +64,25 @@ app.get('/', (req, res) => {
     res.sendFile(__dirname + '/public/index.html')
 })
 
-// API comparison endpoint - calls both V5 and V6 in parallel
+// API comparison endpoint - calls V5, V6, or both based on version parameter
 app.post('/api/compare', async (req, res) => {
-    const { apiEndpoint, params } = req.body
+    const { apiEndpoint, params, version = 'both' } = req.body
 
-    if (!mindbodyV5 || !mindbodyV6) {
+    // Check service availability based on requested version
+    if (version === 'both' && (!mindbodyV5 || !mindbodyV6)) {
         return res.status(503).json({
             error: 'Services not initialized',
-            message: 'Both V5 and V6 services must be initialized'
+            message: 'Both V5 and V6 services must be initialized for comparison'
+        })
+    } else if (version === 'v5' && !mindbodyV5) {
+        return res.status(503).json({
+            error: 'V5 service not initialized',
+            message: 'V5 (SOAP) service must be initialized'
+        })
+    } else if (version === 'v6' && !mindbodyV6) {
+        return res.status(503).json({
+            error: 'V6 service not initialized',
+            message: 'V6 (REST) service must be initialized'
         })
     }
 
@@ -81,7 +92,7 @@ app.post('/api/compare', async (req, res) => {
     })
 
     try {
-        console.log(`🔍 API Comparison Request: ${apiEndpoint}`, params)
+        console.log(`🔍 API ${version.toUpperCase()} Request: ${apiEndpoint}`, params)
         const startTime = Date.now()
 
         // Extract site_id from params for dynamic service creation
@@ -89,17 +100,32 @@ app.post('/api/compare', async (req, res) => {
         // Create dynamic service instances based on site_id parameter
         const dynamicServices = createDynamicServices(site_id);
 
-        console.log(`📋 Using site_id: ${site_id || 'default'} for comparison`);
+        console.log(`📋 Using site_id: ${site_id || 'default'} for ${version} call(s)`);
 
         // Race against timeout to ensure we always respond
         const result = await Promise.race([
-            // Main comparison logic
+            // Main API call logic based on version
             (async () => {
-                // Call both APIs in parallel with individual timeouts using dynamic services
-                const [v5Result, v6Result] = await Promise.allSettled([
-                    callMindbodyAPI(dynamicServices.v5, apiEndpoint, params),
-                    callMindbodyAPI(dynamicServices.v6, apiEndpoint, params)
-                ])
+                let v5Result, v6Result;
+
+                // Call APIs based on selected version
+                if (version === 'both') {
+                    // Call both APIs in parallel
+                    [v5Result, v6Result] = await Promise.allSettled([
+                        callMindbodyAPI(dynamicServices.v5, apiEndpoint, params),
+                        callMindbodyAPI(dynamicServices.v6, apiEndpoint, params)
+                    ]);
+                } else if (version === 'v5') {
+                    // Call only V5 API
+                    [v5Result] = await Promise.allSettled([
+                        callMindbodyAPI(dynamicServices.v5, apiEndpoint, params)
+                    ]);
+                } else if (version === 'v6') {
+                    // Call only V6 API
+                    [v6Result] = await Promise.allSettled([
+                        callMindbodyAPI(dynamicServices.v6, apiEndpoint, params)
+                    ]);
+                }
 
                 return { v5Result, v6Result }
             })(),
@@ -108,42 +134,50 @@ app.post('/api/compare', async (req, res) => {
 
         const { v5Result, v6Result } = result
 
-        console.log(v5Result)
         const endTime = Date.now()
         const totalTime = endTime - startTime
 
-        console.log(`📊 API Results:`)
-        console.log(`   V5: ${v5Result.status}`, v5Result.status === 'fulfilled' ? '✅' : `❌ ${v5Result.reason?.message}`)
-        console.log(`   V6: ${v6Result.status}`, v6Result.status === 'fulfilled' ? '✅' : `❌ ${v6Result.reason?.message}`)
-
-        res.json({
+        // Build response object based on what was called
+        const response = {
             comparison: {
-                v5: {
-                    status: v5Result.status,
-                    data: v5Result.status === 'fulfilled' ? v5Result.value : null,
-                    error: v5Result.status === 'rejected' ? {
-                        message: v5Result.reason.message,
-                        type: v5Result.reason.name || 'Error',
-                        stack: process.env.NODE_ENV === 'development' ? v5Result.reason.stack : undefined
-                    } : null
-                },
-                v6: {
-                    status: v6Result.status,
-                    data: v6Result.status === 'fulfilled' ? v6Result.value : null,
-                    error: v6Result.status === 'rejected' ? {
-                        message: v6Result.reason.message,
-                        type: v6Result.reason.name || 'Error',
-                        stack: process.env.NODE_ENV === 'development' ? v6Result.reason.stack : undefined
-                    } : null
-                },
                 metadata: {
                     totalTime: `${totalTime}ms`,
                     timestamp: new Date().toISOString(),
                     apiEndpoint,
-                    params
+                    params,
+                    version
                 }
             }
-        })
+        };
+
+        // Add results based on version
+        if (v5Result) {
+            console.log(`📊 V5 API Result: ${v5Result.status}`, v5Result.status === 'fulfilled' ? '✅' : `❌ ${v5Result.reason?.message}`);
+            response.comparison.v5 = {
+                status: v5Result.status,
+                data: v5Result.status === 'fulfilled' ? v5Result.value : null,
+                error: v5Result.status === 'rejected' ? {
+                    message: v5Result.reason.message,
+                    type: v5Result.reason.name || 'Error',
+                    stack: process.env.NODE_ENV === 'development' ? v5Result.reason.stack : undefined
+                } : null
+            };
+        }
+
+        if (v6Result) {
+            console.log(`📊 V6 API Result: ${v6Result.status}`, v6Result.status === 'fulfilled' ? '✅' : `❌ ${v6Result.reason?.message}`);
+            response.comparison.v6 = {
+                status: v6Result.status,
+                data: v6Result.status === 'fulfilled' ? v6Result.value : null,
+                error: v6Result.status === 'rejected' ? {
+                    message: v6Result.reason.message,
+                    type: v6Result.reason.name || 'Error',
+                    stack: process.env.NODE_ENV === 'development' ? v6Result.reason.stack : undefined
+                } : null
+            };
+        }
+
+        res.json(response)
     } catch (error) {
         console.error('🚨 API Comparison Error:', error.message)
 
@@ -200,6 +234,19 @@ app.get('/health', (req, res) => {
         services: {
             v5: !!mindbodyV5 ? 'initialized' : 'failed',
             v6: !!mindbodyV6 ? 'initialized' : 'failed'
+        }
+    })
+})
+
+// Debug endpoint for testing connectivity
+app.get('/debug', (req, res) => {
+    console.log('🔍 Debug endpoint called');
+    res.json({
+        message: 'Debug endpoint working',
+        timestamp: new Date().toISOString(),
+        env: {
+            NODE_ENV: process.env.NODE_ENV || 'development',
+            PORT: process.env.PORT || 3000
         }
     })
 })

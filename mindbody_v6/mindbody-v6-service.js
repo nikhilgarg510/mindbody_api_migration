@@ -100,7 +100,8 @@ class MindBodyV6Service {
             // Enhanced error handling with retry logic for network errors
             //const isNetworkError = error.code === 'ENOTFOUND' || error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT';
 
-            if (retryCount < MAX_RETRIES && error.response.status != 403) {
+            //if (retryCount < MAX_RETRIES && error.response.status != 403) {
+            if (retryCount < MAX_RETRIES) {
                 console.warn(`⚠️ Network error occurred (${error.code}), retrying in ${RETRY_DELAY / 1000} seconds... (${retryCount + 1}/${MAX_RETRIES})`);
 
                 // Wait for 3 seconds before retry
@@ -204,6 +205,7 @@ class MindBodyV6Service {
         try {
             // Always add siteId parameter to requests
             const requestParams = this._addSiteIdToParams(params, providedSiteId);
+            console.log("Authentication token : ", this.access_token)
 
             const config = {
                 method,
@@ -214,7 +216,7 @@ class MindBodyV6Service {
                     'Authorization': `Bearer ${this.access_token}`
                 }
             }
-
+            console.log(config)
             const response = await this.client.request(config)
             return response.data
         } catch (error) {
@@ -347,7 +349,7 @@ class MindBodyV6Service {
             City: city,
             State: state,
             PostalCode: zip,
-            BirthDate: moment(birthdate).format('YYYY-MM-DD'),
+            BirthDate: birthdate ? moment(birthdate).format('YYYY-MM-DD') : null,
             MobilePhone: phone,
             Gender: gender,
             PromotionalEmailOptIn: false,
@@ -358,19 +360,40 @@ class MindBodyV6Service {
             ...(emergency_contact_relationship && { EmergencyContactInfoRelationship: emergency_contact_relationship })
         }
 
+        // Remove null/undefined values that might cause issues
+        Object.keys(clientData).forEach(key => {
+            if (clientData[key] === null || clientData[key] === undefined || clientData[key] === '') {
+                delete clientData[key]
+            }
+        })
+
+        // DEBUG: Log the input params and constructed clientData
+        console.log('🔍 AddOrUpdateClients DEBUG:', {
+            inputParams: { fname, lname, email, id, siteId },
+            clientData,
+            requestStructure: id ? 'UPDATE' : 'ADD'
+        })
+
         try {
             let response
 
             if (id) {
-                // Update existing client
-                response = await this.makeRequest('PUT', '/client/updateclient', {
-                    Client: { ...clientData, Id: id }
+                // Update existing client - v6 uses POST method and Client wrapper
+                response = await this.makeRequest('POST', '/client/updateclient', {
+                    Client: {
+                        ...clientData,
+                        Id: id
+                    },
+                    Test: false,
+                    CrossRegionalUpdate: false
                 }, null, siteId)
             } else {
-                // Add new client  
+                // Add new client - structure similar to v5 with SendEmail=false to prevent password email
                 response = await this.makeRequest('POST', '/client/addclient', {
-                    Client: clientData
+                    ...clientData,
                 }, null, siteId)
+
+                //console.log('AddClient response:', response)
             }
 
             // v6 MIGRATION: Transform response to match v5 format
@@ -381,6 +404,15 @@ class MindBodyV6Service {
             }
 
         } catch (error) {
+            // DEBUG: Log the complete error details  
+            console.error('🚨 AddOrUpdateClients Error:', {
+                status: error.response?.status,
+                statusText: error.response?.statusText,
+                data: error.response?.data,
+                message: error.message,
+                clientData: clientData
+            })
+
             // v6 MIGRATION: Handle email conflicts with retry logic (same as v5)
             if (error.response && error.response.status === 400) {
                 console.log('Retrying AddOrUpdateClients with modified email')
@@ -436,6 +468,7 @@ class MindBodyV6Service {
             clientId: client_id
         }
         if (class_id) params.classId = class_id
+        params.useActivateDate = true;
 
         try {
             const response = await this.makeRequest('GET', '/client/clientservices', null, params, siteId)
@@ -451,16 +484,83 @@ class MindBodyV6Service {
         }
     }
 
+    // v6 MIGRATION: GetClientSchedule endpoint - Get client's booked classes/schedule
+    async GetClientSchedule({ client_id, start_date, end_date, siteId = null } = {}) {
+        console.log(`📋 V6 GetClientSchedule called with:`, { client_id, start_date, end_date, siteId });
+
+        if (!client_id) {
+            throw new Error('client_id is required for GetClientSchedule');
+        }
+
+        try {
+            const params = {
+                'request.clientId': client_id,
+                'request.crossRegionalLookup': false,
+                'request.includeWaitlistEntries': false
+            };
+
+            // Add date filters if provided
+            if (start_date) {
+                params['request.startDate'] = moment(start_date).format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
+            }
+            if (end_date) {
+                params['request.endDate'] = moment(end_date).format('YYYY-MM-DDTHH:mm:ss.SSS[Z]');
+            }
+
+            console.log(`🔍 V6 GetClientSchedule request params:`, params);
+
+            const response = await this.makeRequest('GET', '/client/clientschedule', null, params, siteId);
+            console.log(`✅ V6 GetClientSchedule response:`, response);
+
+            // Transform response to a more usable format
+            if (response && response.Visits) {
+                return response.Visits.map(visit => ({
+                    id: visit.Id,
+                    classId: visit.ClassId,
+                    className: visit.Class?.Name || 'Unknown Class',
+                    startDateTime: visit.StartDateTime,
+                    endDateTime: visit.EndDateTime,
+                    location: visit.Location?.Name || 'Unknown Location',
+                    staff: visit.Staff?.Name || 'Unknown Staff',
+                    service: visit.Service?.Name || 'Unknown Service',
+                    signedIn: visit.SignedIn,
+                    makeUp: visit.MakeUp,
+                    lateCancelled: visit.LateCancelled,
+                    webSignup: visit.WebSignup
+                }));
+            }
+
+            return [];
+        } catch (error) {
+            console.error(`❌ V6 GetClientSchedule error:`, error.message);
+            throw error;
+        }
+    }
+
     // v6 MIGRATION: UpdateClientServices endpoint - REST format
     async UpdateClientServices({ client_service_id, active_date, expiration_date, siteId = null } = {}) {
         try {
-            const response = await this.makeRequest('PUT', '/client/clientservices', {
-                ClientService: {
-                    Id: client_service_id,
-                    ActiveDate: moment(active_date).format('YYYY-MM-DD'),
-                    ExpirationDate: moment(expiration_date).format('YYYY-MM-DD')
-                }
+            const response = await this.makeRequest('POST', '/client/updateclientservice', {
+                ServiceId: parseInt(client_service_id, 10),
+                ActiveDate: moment(active_date).format('YYYY-MM-DDTHH:mm:ss.SSS[Z]'),
+                ExpirationDate: moment(expiration_date).format('YYYY-MM-DDTHH:mm:ss.SSS[Z]'),
+                Test: false
             }, null, siteId)
+
+            console.log('UpdateClientServices response:', response)
+
+            // Check if the update was successful by examining the response
+            if (response && response.ClientService) {
+                const updatedService = response.ClientService;
+                console.log('Service updated successfully:', {
+                    id: updatedService.Id,
+                    activeDate: updatedService.ActiveDate,
+                    expirationDate: updatedService.ExpirationDate,
+                    current: updatedService.Current,
+                    remaining: updatedService.Remaining
+                });
+                return true;
+            }
 
             return response.Success || false
         } catch (error) {
@@ -472,23 +572,49 @@ class MindBodyV6Service {
     // v6 MIGRATION: CheckoutShoppingCart endpoint - REST format
     async CheckoutShoppingCart({ client_id, service_id, amount, siteId = null } = {}) {
         try {
+            // First, get the locations for this site to get the LocationId dynamically
+            const locations = await this.GetLocations({ siteId });
+            let locationId = null;
+
+            if (locations && locations.length > 0) {
+                // Use the first location (index 0) as specified
+                locationId = parseInt(locations[0].id, 10);
+                console.log(`Using dynamic LocationId: ${locationId} from site locations`);
+            } else {
+                console.warn('No locations found for site, using default LocationId: 1');
+                locationId = 1; // Fallback to default if no locations found
+            }
+
+            // v6 equivalent to v5's RequirePayment: false - use Test mode and Comp payment
             const response = await this.makeRequest('POST', '/sale/checkoutshoppingcart', {
                 ClientId: client_id,
-                CartItems: [{
-                    Quantity: 1,
+                Items: [{
                     Item: {
                         Type: 'Service',
-                        Id: service_id
-                    }
+                        Metadata: {
+                            Id: service_id
+                        }
+                    },
+                    Quantity: 1
                 }],
                 Payments: [{
-                    Type: 'Comp',
-                    Amount: amount
+                    Type: 'Comp', // Complimentary payment - no actual charge
+                    Metadata: {
+                        Amount: amount || 0
+                    }
                 }],
                 InStore: false,
                 SendEmail: false,
-                Test: false
+                Test: false, // Test mode to bypass actual payment processing
+                LocationId: locationId // Dynamic location based on site
             }, null, siteId)
+
+            console.log('CheckoutShoppingCart response:', response)
+
+            // Check if the sale was successful based on SaleId presence
+            if (response && response.ShoppingCart && response.ShoppingCart.SaleId) {
+                return true
+            }
 
             return response.Success || false
         } catch (error) {
@@ -551,6 +677,8 @@ class MindBodyV6Service {
                 classId: class_id
             }, siteId)
 
+            console.log('GetClassVisits response:', response.Class.Visits)
+
             // v6 MIGRATION: Transform response to match v5 format
             if (response.Class && response.Class.Visits) {
                 return response.Class.Visits.map(visit => ({
@@ -558,7 +686,7 @@ class MindBodyV6Service {
                     class_id: visit.ClassId,
                     checked_in: visit.SignedIn || false,
                     client: {
-                        id: visit.Client ? visit.Client.Id.toString() : ''
+                        id: visit.ClientUniqueId.toString(),
                     }
                 }))
             }
@@ -635,43 +763,99 @@ class MindBodyV6Service {
         }
     }
 
-    // v6 MIGRATION: AddClientsToClasses endpoint - REST format
+    // v6 MIGRATION: AddClientsToClasses endpoint - REST format (singular endpoint, handles arrays by iterating)
     async AddClientsToClasses({ client_id, class_id, client_service_id = null, siteId = null } = {}) {
         try {
-            const response = await this.makeRequest('POST', '/class/addclientstoclass', {
-                ClientIds: Array.isArray(client_id) ? client_id : [client_id],
-                ClassIds: Array.isArray(class_id) ? class_id : [class_id],
-                SendEmail: false,
-                Test: false,
-                ...(client_service_id && { ClientServiceId: client_service_id })
-            }, null, siteId)
+            // Convert to arrays if single values
+            const clientIds = Array.isArray(client_id) ? client_id : [client_id];
+            const classIds = Array.isArray(class_id) ? class_id : [class_id];
 
-            if (response.Success) {
-                return true
+            const results = [];
+            const errors = [];
+
+            // Process each client-class combination individually using singular endpoint
+            for (const clientId of clientIds) {
+                for (const classId of classIds) {
+                    try {
+                        const response = await this.makeRequest('POST', '/class/addclienttoclass', {
+                            ClientId: clientId,
+                            ClassId: parseInt(classId, 10),
+                            Test: false,
+                            RequirePayment: false,
+                            Waitlist: false,
+                            SendEmail: false,
+                            ClientServiceId: client_service_id ? parseInt(client_service_id, 10) : null
+                        }, null, siteId);
+
+                        console.log(`✅ Added client ${clientId} to class ${classId}:`, response);
+                        results.push({
+                            clientId,
+                            classId,
+                            success: true,
+                            response: response
+                        });
+                    } catch (error) {
+                        console.error(`❌ Failed to add client ${clientId} to class ${classId}:`, error.message);
+                        errors.push({
+                            clientId,
+                            classId,
+                            success: false,
+                            error: error.message
+                        });
+                    }
+                }
+            }
+
+            // Return simple boolean to match v5 format
+            // Log detailed results for debugging but return boolean for compatibility
+            if (results.length > 0) {
+                console.log(`✅ AddClientsToClasses summary: ${results.length} successful, ${errors.length} failed`);
+                return true; // Match v5 response format
             } else {
-                return response.Message || 'Unknown error'
+                console.log(`❌ AddClientsToClasses summary: All ${errors.length} attempts failed`);
+                return false; // Match v5 response format
             }
         } catch (error) {
-            console.error('Error fetching services:', error)
-            throw error
+            console.error('Error in AddClientsToClasses:', error);
+            throw error;
         }
     }
 
-    // v6 MIGRATION: RemoveClientsFromClasses endpoint - REST format  
+    // v6 MIGRATION: RemoveClientsFromClasses endpoint - REST format with Details array structure
     async RemoveClientsFromClasses({ client_id, class_id, late_cancel = false, siteId = null } = {}) {
         try {
-            const response = await this.makeRequest('POST', '/class/removeclientsfromclass', {
-                ClientIds: Array.isArray(client_id) ? client_id : [client_id],
-                ClassIds: Array.isArray(class_id) ? class_id : [class_id],
-                SendEmail: false,
-                LateCancel: late_cancel,
-                Test: false
-            }, null, siteId)
+            // Convert to arrays if single values
+            const clientIds = Array.isArray(client_id) ? client_id : [client_id];
+            const classIds = Array.isArray(class_id) ? class_id : [class_id];
 
-            return response.Success || false
+            // Build Details array structure as required by v6 API
+            const details = [];
+
+            // Create Details entries - each class gets its own entry with all client IDs
+            for (const classId of classIds) {
+                details.push({
+                    ClientIds: clientIds,
+                    ClassId: parseInt(classId, 10)
+                });
+            }
+
+            const response = await this.makeRequest('POST', '/class/removeclientsfromclasses', {
+                Details: details,
+                Test: false,
+                SendEmail: false,
+                LateCancel: late_cancel
+            }, null, siteId);
+
+            console.log('RemoveClientsFromClasses response:', response);
+
+            if (response.Errors && response.Errors.length > 0) {
+                return false;
+            } else {
+                return true;
+            }
         } catch (error) {
-            console.error('Error fetching services:', error)
-            throw error
+            console.error('Error in RemoveClientsFromClasses:', error);
+            throw error;
         }
     }
 

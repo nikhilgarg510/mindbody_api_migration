@@ -50,9 +50,10 @@ class MindBodyAPITester {
                 }
             },
             'GetServices': {
-                description: 'Retrieve available services, optionally filtered by class',
+                description: 'Retrieve available services, optionally filtered by class or service ID',
                 parameters: {
                     'class_id': { type: 'number', label: 'Class ID (optional)', placeholder: '123', required: false },
+                    'service_id': { type: 'number', label: 'Service ID (optional)', placeholder: '456', required: false },
                     'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
                 }
             },
@@ -137,6 +138,22 @@ class MindBodyAPITester {
                     'late_cancel': { type: 'checkbox', label: 'Late Cancel', required: false },
                     'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
                 }
+            },
+            'VoidClientService': {
+                description: 'Void a client service by setting past dates (expires the service)',
+                parameters: {
+                    'client_service_id': { type: 'text', label: 'Client Service ID', placeholder: 'CS789-ABC', required: true },
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
+                }
+            },
+            'GetClientSchedule': {
+                description: 'Get a client\'s booked classes and schedule for a date range',
+                parameters: {
+                    'client_id': { type: 'text', label: 'Client ID', placeholder: 'ABC123-XYZ', required: true },
+                    'start_date': { type: 'datetime-local', label: 'Start Date (optional)', required: false },
+                    'end_date': { type: 'datetime-local', label: 'End Date (optional)', required: false },
+                    'siteId': { type: 'number', label: 'Site ID (optional)', placeholder: '1', required: false }
+                }
             }
         };
 
@@ -161,6 +178,13 @@ class MindBodyAPITester {
     bindEvents() {
         document.getElementById('apiSelect').addEventListener('change', (e) => {
             this.handleApiSelection(e.target.value);
+        });
+
+        // Handle version selection change
+        document.querySelectorAll('input[name="apiVersion"]').forEach(radio => {
+            radio.addEventListener('change', () => {
+                this.updateButtonText();
+            });
         });
 
         document.getElementById('compareBtn').addEventListener('click', () => {
@@ -199,6 +223,33 @@ class MindBodyAPITester {
         }
 
         compareBtn.disabled = false;
+
+        // Update button text based on version selection
+        this.updateButtonText();
+    }
+
+    updateButtonText() {
+        const compareBtn = document.getElementById('compareBtn');
+        const selectedVersion = document.querySelector('input[name="apiVersion"]:checked')?.value || 'both';
+
+        let buttonText, buttonIcon;
+        switch (selectedVersion) {
+            case 'v5':
+                buttonText = 'Call V5 API';
+                buttonIcon = 'fas fa-soap';
+                break;
+            case 'v6':
+                buttonText = 'Call V6 API';
+                buttonIcon = 'fas fa-code';
+                break;
+            case 'both':
+            default:
+                buttonText = 'Compare APIs';
+                buttonIcon = 'fas fa-rocket';
+                break;
+        }
+
+        compareBtn.innerHTML = `<i class="${buttonIcon}"></i> ${buttonText}`;
     }
 
     createFieldRow(paramName, config) {
@@ -276,15 +327,24 @@ class MindBodyAPITester {
 
     async compareAPIs() {
         const apiEndpoint = document.getElementById('apiSelect').value;
+        const selectedVersion = document.querySelector('input[name="apiVersion"]:checked').value;
 
-        if (!apiEndpoint) return;
+        console.log('🚀 compareAPIs started');
+        console.log('Selected API:', apiEndpoint);
+        console.log('Selected version:', selectedVersion);
+
+        if (!apiEndpoint) {
+            console.log('❌ No API endpoint selected');
+            return;
+        }
 
         try {
             const params = this.collectParameters();
-            console.log('Making API comparison request:', { apiEndpoint, params });
+            console.log('✅ Parameters collected:', params);
+            console.log('Making API comparison request:', { apiEndpoint, params, version: selectedVersion });
 
             // Show loading state and clear any previous errors
-            this.showLoading(true);
+            this.showLoading(true, selectedVersion);
             this.clearError(); // Clear any previous error messages
             this.hideResults();
 
@@ -314,7 +374,8 @@ class MindBodyAPITester {
                 },
                 body: JSON.stringify({
                     apiEndpoint,
-                    params
+                    params,
+                    version: selectedVersion
                 }),
                 signal: controller.signal
             });
@@ -370,6 +431,7 @@ class MindBodyAPITester {
             }
 
         } catch (error) {
+            console.log('🚨 Error caught in compareAPIs:', error);
             this.clearError(); // Clear any previous error messages
             console.error('API comparison error:', error);
             console.error('Error details:', {
@@ -410,9 +472,43 @@ class MindBodyAPITester {
         }
     }
 
-    showLoading(show) {
-        document.getElementById('loading').style.display = show ? 'block' : 'none';
-        document.getElementById('compareBtn').disabled = show;
+    showLoading(show, version = 'both') {
+        const loadingElement = document.getElementById('loading');
+        const compareBtn = document.getElementById('compareBtn');
+
+        if (!loadingElement || !compareBtn) {
+            console.error('Required elements not found for showLoading');
+            return;
+        }
+
+        compareBtn.disabled = show;
+
+        if (show) {
+            // Update loading message based on selected version
+            let message;
+            switch (version) {
+                case 'v5':
+                    message = 'Calling V5 (SOAP) API...';
+                    break;
+                case 'v6':
+                    message = 'Calling V6 (REST) API...';
+                    break;
+                case 'both':
+                default:
+                    message = 'Calling both V5 and V6 APIs in parallel...';
+                    break;
+            }
+
+            const messageElement = loadingElement.querySelector('p');
+            if (messageElement) {
+                messageElement.textContent = message;
+            }
+            loadingElement.style.display = 'block';
+            console.log('Loading shown:', message);
+        } else {
+            loadingElement.style.display = 'none';
+            console.log('Loading hidden');
+        }
     }
 
     hideResults() {
@@ -446,6 +542,7 @@ class MindBodyAPITester {
         console.log('displayResults called with:', comparison);
         const resultsSection = document.getElementById('results');
         const metadata = document.getElementById('metadata');
+        const comparisonGrid = document.querySelector('.comparison-grid');
 
         // Check if required elements exist
         if (!resultsSection) {
@@ -456,10 +553,12 @@ class MindBodyAPITester {
         console.log('Showing results section and clearing previous content');
         // Show results section
         resultsSection.style.display = 'block';
+        console.log('✅ Results section display set to block');
 
         // Display metadata
         if (metadata && comparison.metadata) {
             console.log('Displaying metadata:', comparison.metadata);
+            const versionInfo = comparison.metadata.version ? ` (${comparison.metadata.version.toUpperCase()})` : '';
             metadata.innerHTML = `
                 <div class="metadata-item">
                     <i class="fas fa-clock"></i>
@@ -471,20 +570,45 @@ class MindBodyAPITester {
                 </div>
                 <div class="metadata-item">
                     <i class="fas fa-code"></i>
-                    <span>API: ${comparison.metadata.apiEndpoint}</span>
+                    <span>API: ${comparison.metadata.apiEndpoint}${versionInfo}</span>
                 </div>
             `;
         } else {
             console.warn('Metadata element or comparison.metadata not found');
         }
 
-        // Display results immediately without timeout
-        console.log('About to display V5 and V6 results');
-        // Display V5 results
-        this.displayApiResult('v5', comparison.v5);
+        // Adjust grid layout based on what APIs were called
+        const hasV5 = comparison.v5 !== undefined;
+        const hasV6 = comparison.v6 !== undefined;
 
-        // Display V6 results  
-        this.displayApiResult('v6', comparison.v6);
+        if (comparisonGrid) {
+            if (hasV5 && hasV6) {
+                // Both APIs - show 2 columns
+                comparisonGrid.style.gridTemplateColumns = '1fr 1fr';
+                comparisonGrid.style.maxWidth = 'none';
+                comparisonGrid.style.margin = '0';
+            } else {
+                // Single API - show 1 column using more space
+                comparisonGrid.style.gridTemplateColumns = '1fr';
+                comparisonGrid.style.maxWidth = '80%';
+                comparisonGrid.style.margin = '0 auto';
+            }
+        }
+
+        // Display results based on what's available
+        console.log('About to display results. V5:', hasV5, 'V6:', hasV6);
+
+        // Hide both initially
+        document.querySelector('.api-result.v5').style.display = 'none';
+        document.querySelector('.api-result.v6').style.display = 'none';
+
+        if (hasV5) {
+            this.displayApiResult('v5', comparison.v5);
+        }
+
+        if (hasV6) {
+            this.displayApiResult('v6', comparison.v6);
+        }
     }
 
     displayApiResult(version, result) {
@@ -605,5 +729,36 @@ class MindBodyAPITester {
 
 // Initialize the tester when the page loads
 document.addEventListener('DOMContentLoaded', () => {
-    new MindBodyAPITester();
+    console.log('🎯 DOM Content Loaded - Initializing MindBodyAPITester');
+    try {
+        const tester = new MindBodyAPITester();
+        console.log('✅ MindBodyAPITester initialized successfully');
+
+        // Test button access
+        const compareBtn = document.getElementById('compareBtn');
+        if (compareBtn) {
+            console.log('✅ Compare button found');
+        } else {
+            console.error('❌ Compare button not found');
+        }
+
+        // Test loading element access
+        const loading = document.getElementById('loading');
+        if (loading) {
+            console.log('✅ Loading element found');
+        } else {
+            console.error('❌ Loading element not found');
+        }
+
+        // Test results element access  
+        const results = document.getElementById('results');
+        if (results) {
+            console.log('✅ Results element found');
+        } else {
+            console.error('❌ Results element not found');
+        }
+
+    } catch (error) {
+        console.error('❌ Failed to initialize MindBodyAPITester:', error);
+    }
 });
